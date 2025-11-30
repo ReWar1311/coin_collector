@@ -9,6 +9,7 @@ const HAZARD_RADIUS = 20;
 
 const REQUIRED_PLAYERS = Number(process.env.REQUIRED_PLAYERS ?? 2);
 const NETWORK_LATENCY_MS = Number(process.env.NETWORK_LATENCY_MS ?? 200);
+const PLAYER_LATENCY_MS = Number(process.env.PLAYER_LATENCY_MS ?? 200);
 const TICK_RATE = Number(process.env.TICK_RATE ?? 30);
 
 const DIFFICULTIES = {
@@ -68,6 +69,39 @@ const GAME_MODES = {
   },
 };
 
+const AVATARS = [
+  {
+    key: 'onyx',
+    label: 'Astral Onyx',
+    asset: '/Avatars/black.svg',
+  },
+  {
+    key: 'terra',
+    label: 'Solar Terra',
+    asset: '/Avatars/brown.svg',
+  },
+  {
+    key: 'ember',
+    label: 'Crimson Ember',
+    asset: '/Avatars/red.svg',
+  },
+  {
+    key: 'aero',
+    label: 'Nebula Skydrift',
+    asset: '/Avatars/skyblue.svg',
+  },
+  {
+    key: 'nova',
+    label: 'Iridescent Nova',
+    asset: '/Avatars/white.svg',
+  },
+  {
+    key: 'sol',
+    label: 'Solaris Pulse',
+    asset: '/Avatars/yellow.svg',
+  },
+];
+
 module.exports = {
   MAP,
   PLAYER_SIZE,
@@ -75,7 +109,9 @@ module.exports = {
   HAZARD_RADIUS,
   REQUIRED_PLAYERS,
   NETWORK_LATENCY_MS,
+  PLAYER_LATENCY_MS,
   TICK_RATE,
   DIFFICULTIES,
   GAME_MODES,
+  AVATARS,
 };
