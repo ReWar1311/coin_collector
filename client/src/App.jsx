@@ -16,6 +16,13 @@ const AVATAR_POOL = [
   '/Avatars/yellow.svg',
 ]
 const CRITICAL_TIME_MS = 10000
+const BGM_TRACKS = [
+  {
+    key: 'interstellar',
+    label: 'Interstellar Hero',
+    src: '/bgm/loop_interstellarhero_00.wav.wav',
+  },
+]
 
 function App() {
   const canvasRef = useRef(null)
@@ -32,6 +39,9 @@ function App() {
   const coinSpriteRef = useRef(null)
   const audioBankRef = useRef({})
   const avatarAssignmentsRef = useRef({})
+  const avatarImagesRef = useRef({})
+  const bgmRef = useRef(null)
+  const localPlayerRef = useRef(null)
   const coinCountRef = useRef(null)
   const tenSecondWarningRef = useRef(false)
   const countdownCueRef = useRef(false)
@@ -55,8 +65,18 @@ function App() {
   const [matchClock, setMatchClock] = useState(null)
   const [toast, setToast] = useState(null)
   const [goFlash, setGoFlash] = useState(false)
+  const [availableAvatars, setAvailableAvatars] = useState([])
+  const [avatarKey, setAvatarKey] = useState(null)
+  const [bgmEnabled, setBgmEnabled] = useState(true)
+  const [bgmVolume, setBgmVolume] = useState(0.2)
+  const [voiceVolume, setVoiceVolume] = useState(0.8)
+  const [lobbySnapshot, setLobbySnapshot] = useState({ onlinePlayers: 0, waitingPlayers: 0, rooms: [] })
 
   const serverUrl = useMemo(() => import.meta.env.VITE_SERVER_URL || FALLBACK_SERVER, [])
+  const avatarMap = useMemo(
+    () => Object.fromEntries(availableAvatars.map((avatar) => [avatar.key, avatar])),
+    [availableAvatars],
+  )
 
   useEffect(() => {
     connect()
@@ -79,14 +99,15 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const createClip = (src, volume = 1) => {
+    const createClip = (src, baseVolume = 1) => {
       const audio = new Audio(src)
       audio.preload = 'auto'
-      audio.volume = volume
+      audio.__baseVolume = baseVolume
+      audio.volume = baseVolume * voiceVolume
       return audio
     }
     audioBankRef.current = {
-      countdown3: createClip('/music/3_sec_countdown.wav', 0.75),
+      countdown3: createClip('/music/3_sec_countdown.wav', 0.9),
       go: createClip('/music/go.wav', 0.85),
       coin: createClip('/music/coin.wav', 0.6),
       ten: createClip('/music/10_sec_countdown.flac', 0.8),
@@ -98,6 +119,58 @@ function App() {
       })
     }
   }, [])
+
+  useEffect(() => {
+    Object.values(audioBankRef.current || {}).forEach((clip) => {
+      if (!clip) return
+      const base = typeof clip.__baseVolume === 'number' ? clip.__baseVolume : 1
+      clip.volume = base * voiceVolume
+    })
+  }, [voiceVolume])
+
+  useEffect(() => {
+    const track = new Audio(BGM_TRACKS[0].src)
+    track.loop = true
+    track.preload = 'auto'
+    track.volume = bgmVolume
+    bgmRef.current = track
+    return () => {
+      track.pause()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (bgmRef.current) {
+      bgmRef.current.volume = bgmVolume
+    }
+  }, [bgmVolume])
+
+  useEffect(() => {
+    const track = bgmRef.current
+    if (!track) return
+    const shouldPlay = bgmEnabled && (phase === 'countdown' || phase === 'playing')
+    if (shouldPlay) {
+      track.play().catch(() => {})
+    } else {
+      track.pause()
+      if (!shouldPlay) {
+        track.currentTime = 0
+      }
+    }
+  }, [bgmEnabled, phase])
+
+  useEffect(() => {
+    availableAvatars.forEach((avatar) => {
+      if (!avatar.asset || avatarImagesRef.current[avatar.asset]) return
+      const img = new Image()
+      img.src = avatar.asset
+      avatarImagesRef.current[avatar.asset] = img
+    })
+  }, [availableAvatars])
+
+  useEffect(() => {
+    localPlayerRef.current = localPlayerId
+  }, [localPlayerId])
 
   useEffect(() => () => {
     if (goFlashTimerRef.current) {
@@ -122,16 +195,36 @@ function App() {
     }
   }
 
-  function avatarSrcForPlayer(playerId, slot = 0) {
-    if (!playerId) {
-      return AVATAR_POOL[slot % AVATAR_POOL.length]
+  function resolveAvatarAsset(avatarKey, playerId, slot = 0) {
+    if (avatarKey && avatarMap[avatarKey]?.asset) {
+      return avatarMap[avatarKey].asset
     }
-    const idKey = String(playerId)
+    const idKey = playerId ? String(playerId) : `slot-${slot}`
     if (!avatarAssignmentsRef.current[idKey]) {
       const hash = [...idKey].reduce((acc, char) => acc + char.charCodeAt(0), slot * 31)
       avatarAssignmentsRef.current[idKey] = AVATAR_POOL[hash % AVATAR_POOL.length]
     }
     return avatarAssignmentsRef.current[idKey]
+  }
+
+  function readablePhase(value) {
+    const lookup = {
+      lobby: 'Lobby',
+      staging: 'Staging',
+      countdown: 'Countdown',
+      playing: 'In Match',
+      results: 'Results',
+      waiting: 'Forming',
+    }
+    return lookup[value] || value || '—'
+  }
+
+  function modeLabel(key) {
+    return availableModes[key]?.label || key || '—'
+  }
+
+  function difficultyLabel(key) {
+    return availableDifficulties[key]?.label || key || '—'
   }
 
   function resetMatchFeedback() {
@@ -202,6 +295,8 @@ function App() {
     setMatchMeta(null)
     setScoreboard([])
     setMatchClock(null)
+    setLocalPlayerId(null)
+    localPlayerRef.current = null
     setPhase('lobby')
     resetMatchFeedback()
   }
@@ -255,6 +350,7 @@ function App() {
     switch (message.type) {
       case 'welcome':
         setLocalPlayerId(message.playerId)
+        localPlayerRef.current = message.playerId
         setLatencyBudget(message.latencyMs ?? INTERPOLATION_DELAY)
         hydrateOptions(message)
         break
@@ -283,6 +379,13 @@ function App() {
       case 'matchEvent':
         handleMatchEvent(message)
         break
+      case 'lobbySnapshot':
+        setLobbySnapshot({
+          onlinePlayers: message.onlinePlayers ?? 0,
+          waitingPlayers: message.waitingPlayers ?? 0,
+          rooms: Array.isArray(message.rooms) ? message.rooms : [],
+        })
+        break
       default:
         break
     }
@@ -307,6 +410,16 @@ function App() {
       setAvailableDifficulties(keyed)
       if (!keyed[selection.difficultyKey]) {
         setSelection((prev) => ({ ...prev, difficultyKey: message.difficulties[0]?.key || prev.difficultyKey }))
+      }
+    }
+    if (Array.isArray(message.avatars)) {
+      setAvailableAvatars(message.avatars)
+      const preferred = (avatarKey && message.avatars.find((avatar) => avatar.key === avatarKey))
+        ? avatarKey
+        : message.avatars[0]?.key
+      if (preferred) {
+        setAvatarKey(preferred)
+        send({ type: 'setAvatar', avatarKey: preferred })
       }
     }
     send({ type: 'setName', name: nameInput || `Pilot-${message.playerId}` })
@@ -485,25 +598,43 @@ function App() {
   }
 
   function drawPlayers(ctx, players) {
+    const localId = localPlayerRef.current
     Object.values(players).forEach((player, index) => {
       const color = COLORS[player.slot - 1] || COLORS[index % COLORS.length]
-      const half = PLAYER_SIZE / 2
-      ctx.fillStyle = player.id === localPlayerId ? color : `${color}cc`
+      const radius = PLAYER_SIZE / 2
+      const { x, y } = player.position
+      ctx.save()
+      ctx.beginPath()
+      ctx.arc(x, y, radius + 6, 0, Math.PI * 2)
+      ctx.fillStyle = player.id === localId ? `${color}55` : `${color}25`
+      ctx.fill()
       ctx.strokeStyle = '#0f172a'
       ctx.lineWidth = 2
-      ctx.beginPath()
-      if (ctx.roundRect) {
-        ctx.roundRect(player.position.x - half, player.position.y - half, PLAYER_SIZE, PLAYER_SIZE, 8)
-      } else {
-        ctx.rect(player.position.x - half, player.position.y - half, PLAYER_SIZE, PLAYER_SIZE)
-      }
-      ctx.fill()
       ctx.stroke()
+      ctx.restore()
+
+      const asset = resolveAvatarAsset(player.avatarKey, player.id, player.slot ?? index + 1)
+      const sprite = asset ? avatarImagesRef.current[asset] : null
+      if (sprite?.complete) {
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(x, y, radius, 0, Math.PI * 2)
+        ctx.closePath()
+        ctx.clip()
+        ctx.drawImage(sprite, x - radius, y - radius, radius * 2, radius * 2)
+        ctx.restore()
+      } else {
+        ctx.beginPath()
+        ctx.fillStyle = player.id === localId ? color : `${color}cc`
+        ctx.arc(x, y, radius, 0, Math.PI * 2)
+        ctx.fill()
+      }
 
       ctx.fillStyle = '#e2e8f0'
       ctx.font = '13px "JetBrains Mono", monospace'
       ctx.textAlign = 'center'
-      ctx.fillText(player.name ?? '—', player.position.x, player.position.y - half - 12)
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(player.name ?? '—', x, y - radius - 10)
     })
   }
 
@@ -526,8 +657,9 @@ function App() {
   }
 
   function applyLocalPrediction(snapshot) {
-    if (!snapshot || !localPlayerId) return snapshot
-    const me = snapshot.players[localPlayerId]
+    const localId = localPlayerRef.current
+    if (!snapshot || !localId) return snapshot
+    const me = snapshot.players[localId]
     if (!me) return snapshot
 
     const predicted = { ...snapshot, players: { ...snapshot.players } }
@@ -545,7 +677,7 @@ function App() {
       clone.position.y += ((dirY / length) * speed * dt)
       clampToArena(clone.position)
     }
-    predicted.players[localPlayerId] = clone
+    predicted.players[localId] = clone
     return predicted
   }
 
@@ -614,6 +746,26 @@ function App() {
     setSelection((prev) => ({ ...prev, ...partial }))
   }
 
+  function handleAvatarSelect(key) {
+    if (!key || key === avatarKey) return
+    setAvatarKey(key)
+    send({ type: 'setAvatar', avatarKey: key })
+  }
+
+  function handleBgmVolumeChange(event) {
+    const value = Number(event.target.value)
+    setBgmVolume(Math.min(1, Math.max(0, value / 100)))
+  }
+
+  function handleVoiceVolumeChange(event) {
+    const value = Number(event.target.value)
+    setVoiceVolume(Math.min(1, Math.max(0, value / 100)))
+  }
+
+  function toggleBgm() {
+    setBgmEnabled((prev) => !prev)
+  }
+
   const countdownMs = matchClock?.countdownEndsAt
     ? Math.max(0, matchClock.countdownEndsAt - syncedNow())
     : null
@@ -630,6 +782,14 @@ function App() {
       : null
 
   const sortedScores = [...scoreboard].sort((a, b) => b.score - a.score)
+  const roomsOnline = (lobbySnapshot.rooms || []).slice(0, 4)
+  const showGameOverOverlay = phase === 'results'
+  const isDraw = sortedScores.length > 1 && (sortedScores[0]?.score ?? 0) === (sortedScores[1]?.score ?? -1)
+  const gameOverCopy = isDraw
+    ? 'Dead heat!'
+    : sortedScores[0]
+      ? `${sortedScores[0].name ?? 'Pilot'} wins`
+      : 'Match complete'
 
   useEffect(() => {
     if (remainingMs !== null && remainingMs > 0 && remainingMs <= CRITICAL_TIME_MS) {
@@ -659,67 +819,197 @@ function App() {
   }, [countdownActive, countdownMs])
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <header>
-          <h1>Coin Collector</h1>
-          <p className="status-line">{statusMessage}</p>
-        </header>
-
-        <div className="field">
-          <label htmlFor="name">Callsign</label>
-          <div className="name-row">
-            <input
-              id="name"
-              value={nameInput}
-              placeholder="Nova"
-              onChange={(event) => setNameInput(event.target.value)}
-            />
-            <button onClick={() => send({ type: 'setName', name: nameInput })} disabled={!nameInput}>
-              Save
-            </button>
+    <div className="layout-shell">
+      <section className="primary-column">
+        <div className="panel hero-panel">
+          <div>
+            <p className="eyebrow">Multiplayer prototype</p>
+            <h1>Coin Collector</h1>
+            <p className="status-line">{statusMessage}</p>
+          </div>
+          <div className="hero-metrics">
+            <div>
+              <span>Phase</span>
+              <strong>{readablePhase(phase)}</strong>
+            </div>
+            <div className={isCriticalTimer ? 'critical' : ''}>
+              <span>Timer</span>
+              <strong>{remainingMs ? `${Math.ceil(remainingMs / 1000)}s` : '—'}</strong>
+            </div>
+            <div>
+              <span>Room</span>
+              <strong>{matchMeta?.roomId || '—'}</strong>
+            </div>
           </div>
         </div>
 
-        <section className="panel">
-          <h2>Difficulty</h2>
-          <div className="grid">
+        <div className="panel play-panel">
+          <header className="panel-heading">
+            <div>
+              <span>Mode</span>
+              <strong>{matchMeta?.mode?.label || '—'}</strong>
+            </div>
+            <div>
+              <span>Difficulty</span>
+              <strong>{matchMeta?.difficulty?.label || '—'}</strong>
+            </div>
+            <div>
+              <span>Latency</span>
+              <strong>{latencyBudget}ms</strong>
+            </div>
+          </header>
+          <div className="canvas-wrapper">
+            <canvas ref={canvasRef} width={mapSize.width} height={mapSize.height} />
+            {showCountdownOverlay && countdownLabel !== null && (
+              <div className={`countdown-overlay ${goFlash ? 'go' : ''}`}>
+                <span>{countdownLabel}</span>
+              </div>
+            )}
+            {toast && <div className="toast">{toast}</div>}
+          </div>
+        </div>
+
+        <div className="panel scoreboard-panel">
+          <header className="panel-heading">
+            <div>
+              <span>Current Match</span>
+              <strong>Mission Scoreboard</strong>
+            </div>
+            <button className="ghost" onClick={joinQueue}>
+              Re-queue after match
+            </button>
+          </header>
+          {sortedScores.length === 0 ? (
+            <p className="muted">Pilots not synced yet.</p>
+          ) : (
+            <div className="scoreboard-list">
+              {sortedScores.map((player, index) => {
+                const displayName = player.name ?? '—'
+                const rowKey = player.id ?? `${displayName}-${index}`
+                return (
+                  <div key={rowKey} className={`score-row ${player.id === localPlayerId ? 'me' : ''}`}>
+                    <div className="score-meta">
+                      <img
+                        src={resolveAvatarAsset(player.avatarKey, player.id, player.slot ?? index)}
+                        alt={`${displayName} avatar`}
+                      />
+                      <div>
+                        <span>{displayName}</span>
+                        <small>Slot {player.slot ?? index + 1}</small>
+                      </div>
+                    </div>
+                    <strong>{player.score}</strong>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="side-column">
+        <div className="panel settings-panel">
+          <header>
+            <h2>Pilot Settings</h2>
+            <small>ID: {localPlayerId ?? '—'}</small>
+          </header>
+          <div className="field">
+            <label htmlFor="name">Callsign</label>
+            <div className="name-row">
+              <input
+                id="name"
+                value={nameInput}
+                placeholder="Nova"
+                onChange={(event) => setNameInput(event.target.value)}
+              />
+              <button onClick={() => send({ type: 'setName', name: nameInput })} disabled={!nameInput}>
+                Save
+              </button>
+            </div>
+          </div>
+          <div className="field">
+            <label>Avatar</label>
+            <div className="avatar-grid">
+              {availableAvatars.length === 0 && <p className="muted">Linking cosmetics...</p>}
+              {availableAvatars.map((avatar) => (
+                <button
+                  type="button"
+                  key={avatar.key}
+                  className={`avatar-pill ${avatarKey === avatar.key ? 'active' : ''}`}
+                  onClick={() => handleAvatarSelect(avatar.key)}
+                >
+                  <img src={avatar.asset} alt={avatar.label} />
+                  <span>{avatar.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="audio-controls">
+            <label className="toggle">
+              <input type="checkbox" checked={bgmEnabled} onChange={toggleBgm} />
+              <span>Background BGM</span>
+            </label>
+            <div className="slider-group">
+              <span>BGMs</span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={Math.round(bgmVolume * 100)}
+                onChange={handleBgmVolumeChange}
+              />
+            </div>
+            <div className="slider-group">
+              <span>Voice & FX</span>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={Math.round(voiceVolume * 100)}
+                onChange={handleVoiceVolumeChange}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="panel preset-panel">
+          <header>
+            <h2>Match Preset</h2>
+            <small>Pick rules then queue</small>
+          </header>
+          <div className="pill-group">
             {Object.values(availableDifficulties).map((difficulty) => (
               <button
                 key={difficulty.key}
                 className={`pill ${selection.difficultyKey === difficulty.key ? 'active' : ''}`}
                 onClick={() => updateSelection({ difficultyKey: difficulty.key })}
               >
-                <span>{difficulty.label}</span>
+                <strong>{difficulty.label}</strong>
                 <small>{difficulty.description}</small>
               </button>
             ))}
           </div>
-        </section>
-
-        <section className="panel">
-          <h2>Mode</h2>
-          <div className="grid">
+          <div className="pill-group">
             {Object.values(availableModes).map((mode) => (
               <button
                 key={mode.key}
                 className={`pill ${selection.modeKey === mode.key ? 'active' : ''}`}
                 onClick={() => updateSelection({ modeKey: mode.key })}
               >
-                <span>{mode.label}</span>
+                <strong>{mode.label}</strong>
                 <small>{mode.description}</small>
               </button>
             ))}
           </div>
-        </section>
-
-        <section className="panel queue-panel">
-          <h2>Matchmaking</h2>
-          <p>State: {connectionState}</p>
-          <p>
-            Queue: {queueInfo.status}
-            {queueInfo.position && ` (${queueInfo.position}/${queueInfo.needed})`}
-          </p>
+          <div className="queue-status">
+            <span>Connection: {connectionState}</span>
+            <span>
+              Queue: {queueInfo.status}
+              {queueInfo.position && ` (${queueInfo.position}/${queueInfo.needed})`}
+            </span>
+          </div>
           <div className="queue-actions">
             <button className="primary" onClick={joinQueue} disabled={connectionState !== 'connected'}>
               Join Queue
@@ -728,66 +1018,99 @@ function App() {
               Leave
             </button>
           </div>
-        </section>
-
-        <section className="panel">
-          <h2>Telemetry</h2>
-          <p>Phase: {phase}</p>
-          <p>Latency budget: {latencyBudget}ms</p>
-          <p>Countdown: {countdownMs ? `${Math.ceil(countdownMs / 1000)}s` : '—'}</p>
-          <p>
-            Timer:{' '}
-            <span className={`timer-chip ${isCriticalTimer ? 'critical' : ''}`}>
-              {remainingMs ? `${Math.ceil(remainingMs / 1000)}s` : '—'}
-            </span>
-          </p>
-          <p>Controls: WASD / Arrows</p>
-        </section>
-      </aside>
-
-      <main>
-        <div className="playfield">
-          <div className="hud">
-            <div>
-              <span className="label">Mode</span>
-              <strong>{matchMeta?.mode?.label || '—'}</strong>
-            </div>
-            <div>
-              <span className="label">Difficulty</span>
-              <strong>{matchMeta?.difficulty?.label || '—'}</strong>
-            </div>
-            <div>
-              <span className="label">Room</span>
-              <strong>{matchMeta?.roomId || '—'}</strong>
-            </div>
-          </div>
-          <canvas ref={canvasRef} width={mapSize.width} height={mapSize.height} />
-          {showCountdownOverlay && countdownLabel !== null && (
-            <div className={`countdown-overlay ${goFlash ? 'go' : ''}`}>
-              <span>{countdownLabel}</span>
-            </div>
-          )}
-          <div className="scoreboard">
-            {sortedScores.map((player, index) => {
-              const displayName = player.name ?? '—'
-              const rowKey = player.id ?? `${displayName}-${index}`
-              return (
-                <div key={rowKey} className={`score-row ${player.id === localPlayerId ? 'me' : ''}`}>
-                  <div className="score-meta">
-                    <img
-                      src={avatarSrcForPlayer(player.id, player.slot ?? 0)}
-                      alt={`${displayName} avatar`}
-                    />
-                    <span>{displayName}</span>
-                  </div>
-                  <strong>{player.score}</strong>
-                </div>
-              )
-            })}
-          </div>
-          {toast && <div className="toast">{toast}</div>}
         </div>
-      </main>
+
+        <div className="panel lobby-panel">
+          <header>
+            <h2>Ops Center</h2>
+            <small>Live multiplayer snapshot</small>
+          </header>
+          <div className="lobby-metrics">
+            <div>
+              <span>Online Pilots</span>
+              <strong>{lobbySnapshot.onlinePlayers}</strong>
+            </div>
+            <div>
+              <span>Waiting</span>
+              <strong>{lobbySnapshot.waitingPlayers}</strong>
+            </div>
+            <div>
+              <span>Active Rooms</span>
+              <strong>{lobbySnapshot.rooms?.length || 0}</strong>
+            </div>
+          </div>
+          <div className="room-list">
+            {roomsOnline.length === 0 && <p className="muted">No active rooms yet.</p>}
+            {roomsOnline.map((room) => (
+              <div key={room.id} className="room-pill">
+                <div>
+                  <strong>{modeLabel(room.modeKey)}</strong>
+                  <small>{difficultyLabel(room.difficultyKey)}</small>
+                </div>
+                <div className="room-meta">
+                  <span className={`phase-chip phase-${room.phase}`}>{readablePhase(room.phase)}</span>
+                  <div className="room-avatars">
+                    {room.players?.map((pilot) => (
+                      <img
+                        key={`${room.id}-${pilot.id}`}
+                        src={resolveAvatarAsset(pilot.avatarKey, pilot.id, pilot.slot)}
+                        alt={`${pilot.name || 'Pilot'} avatar`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel telemetry-panel">
+          <header>
+            <h2>Telemetry</h2>
+          </header>
+          <ul>
+            <li>Latency budget: {latencyBudget}ms</li>
+            <li>Countdown: {countdownMs ? `${Math.ceil(countdownMs / 1000)}s` : '—'}</li>
+            <li>Timer: {remainingMs ? `${Math.ceil(remainingMs / 1000)}s` : '—'}</li>
+            <li>Map: {mapSize.width}×{mapSize.height}</li>
+            <li>Controls: WASD / Arrow Keys</li>
+          </ul>
+        </div>
+      </section>
+
+      {showGameOverOverlay && (
+        <div className="gameover-overlay">
+          <div className="gameover-card">
+            <p className="eyebrow">Match Complete</p>
+            <h2>{gameOverCopy}</h2>
+            <div className="gameover-scores">
+              {sortedScores.map((player, index) => {
+                const label = player.name ?? `Pilot ${index + 1}`
+                return (
+                  <div key={`result-${player.id ?? index}`} className="score-row">
+                    <div className="score-meta">
+                      <img
+                        src={resolveAvatarAsset(player.avatarKey, player.id, player.slot ?? index)}
+                        alt={`${label} avatar`}
+                      />
+                      <span>{label}</span>
+                    </div>
+                    <strong>{player.score}</strong>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="gameover-actions">
+              <button className="primary" onClick={joinQueue}>
+                Re-Queue
+              </button>
+              <button className="ghost" onClick={leaveQueue}>
+                Leave Queue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
