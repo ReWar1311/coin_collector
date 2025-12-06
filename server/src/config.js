@@ -8,8 +8,8 @@ const COIN_RADIUS = 18;
 const HAZARD_RADIUS = 20;
 
 const REQUIRED_PLAYERS = Number(process.env.REQUIRED_PLAYERS ?? 2);
-const NETWORK_LATENCY_MS = Number(process.env.NETWORK_LATENCY_MS ?? 200);
-const PLAYER_LATENCY_MS = Number(process.env.PLAYER_LATENCY_MS ?? 200);
+const NETWORK_LATENCY_MS = Number(process.env.NETWORK_LATENCY_MS ?? 0);
+const PLAYER_LATENCY_MS = Number(process.env.PLAYER_LATENCY_MS ?? 0);
 const TICK_RATE = Number(process.env.TICK_RATE ?? 30);
 
 const DIFFICULTIES = {
