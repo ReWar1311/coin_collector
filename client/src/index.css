@@ -46,7 +46,6 @@ select {
 }
 
 .app-shell {
-  min-height: 100vh;
   display: flex;
   flex-direction: column;
   padding: 24px 32px;
@@ -76,6 +75,9 @@ h3,
 strong {
   font-weight: 600;
   margin: 0;
+}
+h2{
+    font-size: 11px;
 }
 
 p {
@@ -131,6 +133,8 @@ p {
   padding: 20px;
   display: flex;
   flex-direction: column;
+  scrollbar-gutter: stable both-edges;
+  /* overflow-y: auto; */
   gap: 16px;
   backdrop-filter: blur(14px);
 }
@@ -628,5 +632,10 @@ p {
   }
   .sidebar {
     flex-direction: column;
+  }
+}
+@media (min-width: 700px) {
+  .app-shell {
+      height: 100vh;
   }
 }

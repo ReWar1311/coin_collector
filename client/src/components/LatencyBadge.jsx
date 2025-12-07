@@ -15,7 +15,6 @@ const LatencyBadge = ({ latency, connectionState }) => {
     <div className={`latency-badge ${status}`} aria-live="polite">
       <span className="label">Latency</span>
       <strong>{label}</strong>
-      <span className="sub">Target 400 (200+200) ms · {connectionState}</span>
     </div>
   );
 };

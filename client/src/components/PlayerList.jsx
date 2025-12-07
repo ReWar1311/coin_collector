@@ -68,10 +68,10 @@ const PlayerList = ({ players, selfId, onChallenge, challengeStatus, avatarLooku
                   <p className={`player-status ${tone}`}>{isSelf ? `${readableStatus} · You` : readableStatus}</p>
                 </div>
               </div>
-              <div className="player-card__actions">
-                <button type="button" disabled={!canChallenge} onClick={() => onChallenge(player)}>
+              <div className="player-card__actions">{canChallenge && (
+                <button type="button" className="ghost-button" disabled={!canChallenge} onClick={() => onChallenge(player)}>
                   Challenge
-                </button>
+                </button>)}
               </div>
             </div>
           );
