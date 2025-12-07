@@ -35,7 +35,15 @@ export function useGameClient() {
   const previousScoresRef = useRef(new Map());
 
   const serverUrl = useMemo(() => {
-    return import.meta.env.VITE_SERVER_URL || `ws://${window.location.hostname}:8080`;
+    if (import.meta.env.VITE_SERVER_URL) {
+      return import.meta.env.VITE_SERVER_URL;
+    }
+    if (import.meta.env.DEV) {
+      return 'ws://localhost:8080';
+    }
+    const { protocol, host } = window.location;
+    const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProtocol}//${host}`;
   }, []);
 
   const sendMessage = useCallback((payload) => {
