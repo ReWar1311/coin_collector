@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const BGM_TRACKS = [
-  '/bgm/323839__littlerobotsoundfactory__loop_driftingthroughspace_06.wav',
+  // '/bgm/323839__littlerobotsoundfactory__loop_driftingthroughspace_06.wav',
   '/bgm/323846__littlerobotsoundfactory__loop_treasurehunter_04.wav',
   '/bgm/323870__littlerobotsoundfactory__loop_reflections_05.wav',
 ];

@@ -1,14 +1,20 @@
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const WebSocket = require('ws');
 const { MatchManager } = require('./matchManager');
-const { MAP, NETWORK_LATENCY_MS, PLAYER_LATENCY_MS, DIFFICULTIES, GAME_MODES, AVATARS } = require('./config');
+const { MAP, PLAYER_LATENCY_MS, DIFFICULTIES, GAME_MODES, AVATARS } = require('./config');
 const { shortId, sendWithLatency } = require('./utils');
 
 const PORT = process.env.PORT || 8080;
-const server = new WebSocket.Server({ port: PORT });
+const CLIENT_DIST_PATH = process.env.CLIENT_DIST_PATH || path.resolve(__dirname, '../../client/dist');
+const INDEX_FILE = path.join(CLIENT_DIST_PATH, 'index.html');
 const matchManager = new MatchManager({ logger: console });
 const avatarKeys = new Set(AVATARS.map((avatar) => avatar.key));
+const httpServer = http.createServer(handleHttpRequest);
+const wss = new WebSocket.Server({ server: httpServer });
 
-server.on('connection', (ws) => {
+wss.on('connection', (ws) => {
   const player = createSession(ws);
   matchManager.registerPlayer(player);
   sendWelcome(player);
@@ -21,6 +27,108 @@ server.on('connection', (ws) => {
     matchManager.removePlayer(player);
   });
 });
+
+httpServer.listen(PORT, () => {
+  console.log(`Server listening on http://localhost:${PORT}`);
+});
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.webm': 'video/webm',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+function handleHttpRequest(req, res) {
+  const method = req.method || 'GET';
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname === '/health' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(
+      JSON.stringify({
+        status: 'ok',
+        uptime: process.uptime(),
+        timestamp: Date.now(),
+      })
+    );
+    return;
+  }
+
+  if (!['GET', 'HEAD'].includes(method)) {
+    res.writeHead(405);
+    res.end();
+    return;
+  }
+
+  serveStaticAsset(url.pathname, method === 'HEAD', res);
+}
+
+function serveStaticAsset(requestPathname, isHead, res) {
+  if (!fs.existsSync(CLIENT_DIST_PATH)) {
+    res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Client build not found. Please run npm run build in the client project.');
+    return;
+  }
+
+  const decodedPath = decodeURIComponent(requestPathname || '/');
+  const relativePath = decodedPath.replace(/^\/+/, '');
+  const normalizedRelative = path.normalize(relativePath).replace(/^(\.\.(?:[\/]|$))+/, '');
+  let targetPath = path.join(CLIENT_DIST_PATH, normalizedRelative);
+  if (!targetPath.startsWith(CLIENT_DIST_PATH)) {
+    res.writeHead(403);
+    res.end();
+    return;
+  }
+
+  let targetExists = fs.existsSync(targetPath);
+  let isFile = targetExists && fs.statSync(targetPath).isFile();
+  const wantsAsset = path.extname(normalizedRelative) !== '';
+
+  if (!targetExists || !isFile) {
+    if (!wantsAsset) {
+      targetPath = INDEX_FILE;
+      targetExists = fs.existsSync(targetPath);
+      isFile = targetExists && fs.statSync(targetPath).isFile();
+    } else {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+  }
+
+  if (!targetExists || !isFile) {
+    res.writeHead(404);
+    res.end();
+    return;
+  }
+
+  const ext = path.extname(targetPath).toLowerCase();
+  const headers = { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' };
+  res.writeHead(200, headers);
+
+  if (isHead) {
+    res.end();
+    return;
+  }
+
+  fs.createReadStream(targetPath)
+    .on('error', () => {
+      res.writeHead(500);
+      res.end();
+    })
+    .pipe(res);
+}
 
 function createSession(ws) {
   const id = shortId();
@@ -125,4 +233,4 @@ function handleMessage(player, raw) {
   }
 }
 
-console.log(`Multiplayer server ready on ws://localhost:${PORT}`);
+console.log(`WebSocket server ready on ws://localhost:${PORT}`);
